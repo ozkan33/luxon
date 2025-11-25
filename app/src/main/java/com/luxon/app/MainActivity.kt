@@ -13,7 +13,14 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.ui.draw.shadow
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -53,28 +60,40 @@ class MainActivity : ComponentActivity() {
                     var luxValue by remember { mutableStateOf(0f) }
                     var showRecommendations by remember { mutableStateOf(false) }
                     var showInformation by remember { mutableStateOf(false) }
+                    var isTestMode by remember { mutableStateOf(false) }
+                    var testLuxValue by remember { mutableStateOf(300f) }
+                    var showTestMode by remember { mutableStateOf(false) }
 
                     // Register sensor listener
-                    LaunchedEffect(Unit) {
-                        sensorEventListener = object : SensorEventListener {
-                            override fun onSensorChanged(event: SensorEvent?) {
-                                event?.let {
-                                    if (it.sensor.type == Sensor.TYPE_LIGHT) {
-                                        luxValue = it.values[0]
+                    LaunchedEffect(isTestMode) {
+                        if (!isTestMode) {
+                            sensorEventListener = object : SensorEventListener {
+                                override fun onSensorChanged(event: SensorEvent?) {
+                                    event?.let {
+                                        if (it.sensor.type == Sensor.TYPE_LIGHT) {
+                                            luxValue = it.values[0]
+                                        }
                                     }
                                 }
-                            }
 
-                            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
-                        }
-                        lightSensor?.let {
-                            sensorManager.registerListener(
-                                sensorEventListener,
-                                it,
-                                SensorManager.SENSOR_DELAY_NORMAL
-                            )
+                                override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+                            }
+                            lightSensor?.let {
+                                sensorManager.registerListener(
+                                    sensorEventListener,
+                                    it,
+                                    SensorManager.SENSOR_DELAY_NORMAL
+                                )
+                            }
+                        } else {
+                            sensorEventListener?.let {
+                                sensorManager.unregisterListener(it)
+                            }
                         }
                     }
+                    
+                    // Update lux value based on mode
+                    val currentLuxValue = if (isTestMode) testLuxValue else luxValue
 
                     // Cleanup on dispose
                     DisposableEffect(Unit) {
@@ -86,22 +105,44 @@ class MainActivity : ComponentActivity() {
                     }
 
                     MainScreen(
-                        luxValue = luxValue,
+                        luxValue = currentLuxValue,
+                        isTestMode = isTestMode,
                         onRecommendationsClick = { showRecommendations = true },
                         onInformationClick = { showInformation = true },
+                        onTestModeClick = { showTestMode = true },
                         onExitClick = { finish() }
                     )
 
                     if (showRecommendations) {
                         RecommendationsDialog(
                             onDismiss = { showRecommendations = false },
-                            luxValue = luxValue
+                            luxValue = currentLuxValue
                         )
                     }
 
                     if (showInformation) {
                         InformationDialog(
                             onDismiss = { showInformation = false }
+                        )
+                    }
+                    
+                    if (showTestMode) {
+                        TestModeDialog(
+                            isTestMode = isTestMode,
+                            testLuxValue = testLuxValue,
+                            onTestModeToggle = { 
+                                isTestMode = it
+                                if (it) {
+                                    luxValue = testLuxValue
+                                }
+                            },
+                            onLuxValueChange = { 
+                                testLuxValue = it
+                                if (isTestMode) {
+                                    luxValue = it
+                                }
+                            },
+                            onDismiss = { showTestMode = false }
                         )
                     }
                 }
@@ -113,8 +154,10 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MainScreen(
     luxValue: Float,
+    isTestMode: Boolean,
     onRecommendationsClick: () -> Unit,
     onInformationClick: () -> Unit,
+    onTestModeClick: () -> Unit,
     onExitClick: () -> Unit
 ) {
     val lightStatus = getLightStatus(luxValue)
@@ -128,115 +171,176 @@ fun MainScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.White)
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.SpaceBetween
+            .verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Logo
-        Text(
-            text = buildAnnotatedString {
-                withStyle(style = androidx.compose.ui.text.SpanStyle(color = Color(0xFFFFC107))) {
-                    append("LUX")
-                }
-                withStyle(style = androidx.compose.ui.text.SpanStyle(color = Color.Black)) {
-                    append("ON")
-                }
-            },
-            fontSize = 32.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(top = 40.dp)
-        )
-
-        Spacer(modifier = Modifier.weight(1f))
-
-        // Circular Gauge
-        Box(
-            modifier = Modifier.size(280.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            CircularGauge(
-                progress = animatedProgress,
-                color = lightStatus.color,
-                luxValue = luxValue.toInt()
-            )
-            
-            // Desk icon overlay
-            Icon(
-                imageVector = Icons.Default.Home,
-                contentDescription = null,
-                modifier = Modifier
-                    .size(40.dp)
-                    .offset(x = 100.dp, y = (-20).dp),
-                tint = Color.Black
-            )
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // Status Message
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 16.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Default.WbSunny,
-                contentDescription = null,
-                tint = Color(0xFFFFC107),
-                modifier = Modifier.size(24.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = lightStatus.message,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Medium,
-                color = lightStatus.textColor,
-                textAlign = TextAlign.Center
-            )
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Text(
-            text = lightStatus.description,
-            fontSize = 14.sp,
-            color = Color.Gray,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 16.dp)
-        )
-
-        Spacer(modifier = Modifier.weight(1f))
-
-        // Action Buttons
         Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            modifier = Modifier.padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            ActionButton(
-                icon = Icons.Default.Build,
-                text = "Çalışma masasının yerini ayarla",
-                onClick = { /* TODO: Implement desk position adjustment */ }
+        // Logo and Test Mode Indicator
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(top = 40.dp)
+        ) {
+            Text(
+                text = buildAnnotatedString {
+                    withStyle(style = androidx.compose.ui.text.SpanStyle(color = Color(0xFFD4AF63))) {
+                        append("LUX")
+                    }
+                    withStyle(style = androidx.compose.ui.text.SpanStyle(color = Color.Black)) {
+                        append("ON")
+                    }
+                },
+                fontSize = 32.sp,
+                fontWeight = FontWeight.Bold
             )
-            
-            ActionButton(
-                icon = Icons.Default.Lightbulb,
-                text = "Tavsiyeler",
-                onClick = onRecommendationsClick
-            )
-            
-            ActionButton(
-                icon = Icons.Default.Info,
-                text = "Bilgilendirme",
-                onClick = onInformationClick
-            )
-            
-            ActionButton(
-                icon = Icons.Default.ExitToApp,
-                text = "Çıkış",
-                onClick = onExitClick
-            )
+            if (isTestMode) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Science,
+                        contentDescription = null,
+                        tint = Color(0xFFD4AF63),
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "Test Modu",
+                        fontSize = 12.sp,
+                        color = Color(0xFFD4AF63),
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Main Content Card with Gauge
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .shadow(4.dp, RoundedCornerShape(16.dp)),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Circular Gauge with Desk Icon
+                Box(
+                    modifier = Modifier.size(280.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularGauge(
+                        progress = animatedProgress,
+                        color = lightStatus.color,
+                        luxValue = luxValue.toInt()
+                    )
+                    
+                    // Desk lamp icon button - white circle with black icon
+                    Surface(
+                        shape = CircleShape,
+                        color = Color.White,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .offset(x = 100.dp, y = (-20).dp)
+                            .shadow(2.dp, CircleShape)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.Lightbulb,
+                                contentDescription = null,
+                                modifier = Modifier.size(24.dp),
+                                tint = Color.Black
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // Status Message
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.WbSunny,
+                        contentDescription = null,
+                        tint = Color(0xFFD4AF63),
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = lightStatus.message,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = lightStatus.textColor,
+                        textAlign = TextAlign.Center
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = lightStatus.description,
+                    fontSize = 14.sp,
+                    color = Color.Black,
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            // Action Buttons
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                ActionButton(
+                    icon = Icons.Default.Lightbulb,
+                    text = "Çalışma masasının yerini ayarla",
+                    onClick = { /* TODO: Implement desk position adjustment */ }
+                )
+                
+                ActionButton(
+                    icon = Icons.Default.Lightbulb,
+                    text = "Tavsiyeler",
+                    onClick = onRecommendationsClick
+                )
+                
+                ActionButton(
+                    icon = Icons.Default.Info,
+                    text = "Bilgilendirme",
+                    onClick = onInformationClick
+                )
+                
+                ActionButton(
+                    icon = if (isTestMode) Icons.Default.Science else Icons.Default.Settings,
+                    text = if (isTestMode) "Test Modu: Açık" else "Test Modu",
+                    onClick = onTestModeClick
+                )
+                
+                ActionButton(
+                    icon = Icons.Default.ExitToApp,
+                    text = "Çıkış",
+                    onClick = onExitClick
+                )
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+        }
     }
 }
 
@@ -300,19 +404,18 @@ fun ActionButton(
     text: String,
     onClick: () -> Unit
 ) {
-    Button(
+    OutlinedButton(
         onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
             .height(56.dp),
         shape = RoundedCornerShape(12.dp),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = Color.White,
+        colors = ButtonDefaults.outlinedButtonColors(
             contentColor = Color.Black
         ),
-        elevation = ButtonDefaults.buttonElevation(
-            defaultElevation = 2.dp,
-            pressedElevation = 4.dp
+        border = BorderStroke(
+            width = 1.5.dp,
+            color = Color(0xFFD4AF63)
         )
     ) {
         Row(
@@ -323,13 +426,15 @@ fun ActionButton(
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                modifier = Modifier.size(24.dp)
+                modifier = Modifier.size(24.dp),
+                tint = Color.Black
             )
             Spacer(modifier = Modifier.width(16.dp))
             Text(
                 text = text,
                 fontSize = 16.sp,
-                fontWeight = FontWeight.Medium
+                fontWeight = FontWeight.Medium,
+                color = Color.Black
             )
         }
     }
@@ -444,7 +549,7 @@ fun getLightStatus(luxValue: Float): LightStatus {
         )
         else -> LightStatus(
             message = "Ortam ışığı ideal",
-            description = "Harika! Göz konforu için ideal aydınlatma.",
+            description = "Göz konforu için mükemmel denge.",
             color = Color(0xFF548D6F), // Green
             textColor = Color(0xFF548D6F)
         )
@@ -456,5 +561,134 @@ fun calculateProgress(luxValue: Float): Float {
     // Ideal range is around 300-500, so we'll map:
     // 0-1000 lux -> 0-1 progress
     return (luxValue / 1000f).coerceIn(0f, 1f)
+}
+
+@Composable
+fun TestModeDialog(
+    isTestMode: Boolean,
+    testLuxValue: Float,
+    onTestModeToggle: (Boolean) -> Unit,
+    onLuxValueChange: (Float) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "Test Modu",
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Test Mode Toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Test Modunu Aç",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Switch(
+                        checked = isTestMode,
+                        onCheckedChange = onTestModeToggle
+                    )
+                }
+                
+                if (isTestMode) {
+                    Divider()
+                    
+                    // Current Value Display
+                    Text(
+                        text = "Işık Seviyesi: ${testLuxValue.toInt()} lux",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = getLightStatus(testLuxValue).color
+                    )
+                    
+                    // Slider
+                    Column {
+                        Text(
+                            text = "Lux Değeri: ${testLuxValue.toInt()}",
+                            fontSize = 14.sp,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                        Slider(
+                            value = testLuxValue,
+                            onValueChange = onLuxValueChange,
+                            valueRange = 0f..1000f,
+                            steps = 99
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("0", fontSize = 12.sp, color = Color.Gray)
+                            Text("1000", fontSize = 12.sp, color = Color.Gray)
+                        }
+                    }
+                    
+                    // Preset Buttons
+                    Text(
+                        text = "Hızlı Test Değerleri:",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        PresetButton("Düşük (100)", 100f, onLuxValueChange, Modifier.weight(1f))
+                        PresetButton("İdeal (300)", 300f, onLuxValueChange, Modifier.weight(1f))
+                        PresetButton("Yüksek (600)", 600f, onLuxValueChange, Modifier.weight(1f))
+                    }
+                    
+                    Text(
+                        text = "Test modunda sensör devre dışı bırakılır ve manuel olarak ışık seviyesi ayarlanabilir.",
+                        fontSize = 12.sp,
+                        color = Color.Gray,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                } else {
+                    Text(
+                        text = "Test modunu açarak farklı ışık seviyelerini test edebilirsiniz. Sensör otomatik olarak devre dışı kalacaktır.",
+                        fontSize = 14.sp,
+                        color = Color.Gray
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Tamam")
+            }
+        }
+    )
+}
+
+@Composable
+fun PresetButton(
+    label: String,
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Button(
+        onClick = { onValueChange(value) },
+        modifier = modifier,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = Color(0xFFD4AF63),
+            contentColor = Color.White
+        )
+    ) {
+        Text(label, fontSize = 12.sp)
+    }
 }
 
